@@ -2,7 +2,7 @@ Videoflix Backend
 
 A complete backend API for the Videoflix project.
 Provides user authentication, secure JWT HttpOnly cookies, email activation, password reset, video listing, and full HLS streaming support.
-The entire backend runs inside Docker for full reproducibility including automatic ffmpeg video conversion and thumbnail generation via Django RQ Worker.
+The entire backend runs inside Docker for full reproducibility including automatic HLS conversion and thumbnail generation via ffmpeg and Django-RQ worker.
 
 Table of Contents
 
@@ -38,12 +38,6 @@ Superuser Creation
 
 Troubleshooting
 
-HLS Conversion & Thumbnail Pipeline
-
-RQ Worker System
-
-Media & Static Handling in Docker
-
 Overview
 
 The Videoflix backend provides:
@@ -52,21 +46,23 @@ user registration with email activation
 
 login with HttpOnly cookies
 
-refresh token handling
+refresh token flow
 
-secure logout with refresh token blacklist
+secure logout with token blacklist
 
-password reset via email
+password reset system
 
-automatic HLS generation (480p, 720p, 1080p)
+video listing
 
-automatic thumbnail generation via ffmpeg
+automatic HLS conversion via ffmpeg (480p, 720p, 1080p)
 
-Redis + RQ worker-based async background jobs
+automatic thumbnail generation and URL assignment
 
-full Docker-based environment
+Redis + Django-RQ worker for background tasks
 
-PEP8-compliant clean code
+Docker-based reproducible environment
+
+PEP8-compliant codebase
 
 Technologies Used
 
@@ -76,50 +72,48 @@ Django 5.2
 
 Django REST Framework
 
-JWT (manual implementation)
-
 PostgreSQL
 
 Redis
 
-Django RQ
+Django-RQ
 
-ffmpeg
+ffmpeg (video conversion)
 
-Gunicorn
+JWT (manual cookie-based implementation)
 
 Docker & Docker Compose
 
-WhiteNoise (static files inside Docker)
+WhiteNoise
 
 Features
 Authentication
 
 Email registration
 
-Account activation
+Activation link
 
 Login with HttpOnly cookies
 
 Access/refresh token flow
 
-Logout + blacklist
+Password reset
 
-Password reset via email
+Logout with refresh token blacklist
 
 Video System
 
-video list endpoint
+Video list endpoint
 
-automatic HLS conversion (480p/720p/1080p)
+HLS manifest + segment serving
 
-automatic thumbnail extraction (1s frame)
+Automatic ffmpeg conversion
 
-HLS segment + manifest streaming
+Automatic thumbnail extraction (1-second frame)
 
-async processing via RQ worker
+Background processing using RQ worker
 
-stable absolute/relative URLs provided to frontend
+Compatible with existing frontend expectations
 
 Requirements
 Windows
@@ -128,7 +122,7 @@ Docker Desktop
 
 WSL2
 
-Ubuntu WSL
+Ubuntu
 
 VS Code
 
@@ -140,32 +134,22 @@ VS Code
 
 Project Structure
 core/
-settings.py
-urls.py
+    settings.py
+    urls.py
 
 auth_app/
-api/
-serializers.py
-utils.py
-views.py
-urls.py
-tests/
+    api/...
 
 video_app/
-api/
-serializers.py
-utils.py
-views.py
-urls.py
-tests/
-tasks.py
-signals.py
-models.py
+    api/...
+    tasks.py     <-- ffmpeg HLS + thumbnails
+    signals.py   <-- triggers worker jobs
+    models.py
 
 media/
-hls/
-thumbnails/
-videos/
+    videos/
+    hls/
+    thumbnails/
 
 docker-compose.yml
 backend.Dockerfile
@@ -173,13 +157,14 @@ requirements.txt
 .env.example
 
 Installation
-git clone <your-repository-url>
-cd <project-folder>
+git clone <your repository>
+cd <project>
 
 Environment Setup
 cp .env.example .env
 
-Fill .env:
+
+Fill environment variables:
 
 SECRET_KEY=your-secret-key
 
@@ -192,23 +177,23 @@ DB_PORT=5432
 REDIS_HOST=redis
 REDIS_PORT=6379
 
-# optional
-
-FRONTEND_BASE_URL=http://localhost:5500
-
 Running the Project
-
 1. Start Docker Desktop
-2. Build and start everything
-   docker compose up --build
+2. Start all services
+docker compose up --build
 
-Backend API:
 
-http://localhost:8000/api/
+Backend:
+
+http://localhost:8000
+
 
 Admin panel:
 
 http://localhost:8000/admin/
+
+3. Stop services
+docker compose down
 
 Docker Commands
 
@@ -216,25 +201,25 @@ Build + run:
 
 docker compose up --build
 
+
 Stop:
 
 docker compose down
 
-Worker logs:
-
-docker compose logs -f worker
 
 Backend logs:
 
 docker compose logs -f web
 
+
+Worker logs:
+
+docker compose logs -f worker
+
+
 Enter backend container:
 
 docker compose exec web bash
-
-Clear media folders:
-
-docker compose exec web rm -rf /app/media/hls/\*
 
 Database Migrations
 docker compose exec web python manage.py makemigrations
@@ -245,46 +230,50 @@ docker compose exec web pytest
 
 HLS Directory Structure
 media/
-hls/
-<video_id>/
-480p/
-index.m3u8
-0001.ts
-720p/
-index.m3u8
-1080p/
-index.m3u8
-thumbnails/
-1.jpg
-videos/
-uploadedfile.mp4
+    hls/
+        <id>/
+            480p/
+                index.m3u8
+                0000.ts
+            720p/
+            1080p/
+    thumbnails/
+        <id>.jpg
+    videos/
+        uploaded_file.mp4
+
+
+(Video conversion and thumbnail extraction are executed automatically by the RQ worker.)
 
 API Endpoints
 Authentication
 POST /api/register/
-GET /api/activate/<uid>/<token>/
+GET  /api/activate/<uid>/<token>/
 POST /api/login/
 POST /api/logout/
 POST /api/token/refresh/
 POST /api/password_reset/
 POST /api/password_confirm/<uid>/<token>/
 
-Video Endpoints
-List videos
+Video
 GET /api/video/
 
-HLS files (served by Django)
-GET /media/hls/<id>/<resolution>/index.m3u8
-GET /media/hls/<id>/<resolution>/<segment>.ts
 
-Thumbnails
-<backend_url>/media/thumbnails/<id>.jpg
+HLS files are not under /api — they are served directly from /media:
+
+/media/hls/<id>/<resolution>/index.m3u8
+/media/hls/<id>/<resolution>/<segment>.ts
+
+
+Thumbnails:
+
+/media/thumbnails/<id>.jpg
 
 Authentication Flow
 
 User registers
 
-Activation email is sent
+Backend sends activation email
 
 User activates account
 
@@ -292,98 +281,33 @@ Login sets HttpOnly cookies
 
 Access token expires
 
-Refresh token issues new one
+Refresh token is used to obtain a new one
 
-Logout blacklists refresh token
+Logout blacklists the refresh token
 
 Superuser Creation
 docker compose exec web python manage.py createsuperuser
 
 Troubleshooting
-Worker runs but HLS not generated
+Terminal freezes on Windows
+wsl --shutdown
 
-Check worker logs:
-
+Worker did not generate HLS files
 docker compose logs -f worker
 
-Thumbnails not visible
 
-Ensure frontend uses absolute URL:
-/media/thumbnails/<id>.jpg
+Check for ffmpeg errors inside the container.
 
-Ensure ffmpeg exists inside container (ffmpeg -version)
+Thumbnails missing in Admin
 
-HLS plays only some resolutions
+ensure worker is running
 
-Each video generates:
+ensure /app/media/thumbnails/ is writable
 
-480p
+check worker logs
 
-720p
+Player loads forever
 
-1080p
+ensure path: /media/hls/<id>/<resolution>/index.m3u8
 
-If a resolution is missing, delete folder and reupload.
-
-HLS Conversion & Thumbnail Pipeline
-
-When a video is uploaded through Django Admin:
-
-post_save signal triggers
-
-job added to Redis queue
-
-RQ worker executes convert_video_to_hls(video_id, path)
-
-ffmpeg produces:
-
-/media/hls/<id>/480p/
-
-/media/hls/<id>/720p/
-
-/media/hls/<id>/1080p/
-
-thumbnail generated at media/thumbnails/<id>.jpg
-
-backend saves full URL (/media/thumbnails/<id>.jpg)
-
-frontend receives JSON including thumbnail_url
-
-RQ Worker System
-
-asynchronous
-
-fault-tolerant
-
-logs all ffmpeg commands
-
-prints debug output ([TASK DEBUG] ...)
-
-automatic error propagation
-
-safe retry patterns possible
-
-Worker starts via Docker:
-
-docker compose up worker
-
-Media & Static Handling in Docker
-
-Static files:
-
-STATIC_URL=/static/
-STATIC_ROOT=/app/static
-
-Media files:
-
-MEDIA_URL=/media/
-MEDIA_ROOT=/app/media
-
-Volumes persist:
-
-videoflix_media:/app/media
-
-videoflix_static:/app/static
-
-WhiteNoise serves static files inside the backend container.
-#
+ensure resolution folders exist (480p/720p/1080p)
