@@ -1,0 +1,32 @@
+from django.conf import settings
+from django.test import TestCase
+
+from video_app.models import Video
+from video_app import signals as video_signals
+
+
+class VideoSignalTests(TestCase):
+    """
+    Tests for video signals and background tasks enqueueing.
+    """
+
+    def test_post_save_enqueues_conversion(self):
+        calls = {}
+
+        def fake_enqueue(func, source):
+            calls["func"] = func
+            calls["source"] = source
+
+        video_signals.queue.enqueue = fake_enqueue  # type: ignore[assignment]
+
+        video = Video.objects.create(
+            title="Test",
+            description="Desc",
+            thumbnail_url=f"{settings.MEDIA_URL}dummy.jpg",
+            category="Test",
+            video_file="videos/source.mp4",
+        )
+
+        assert calls["func"].__name__ == "convert_video_variants"
+        assert calls["source"].endswith("videos/source.mp4")
+        assert video.id is not None
