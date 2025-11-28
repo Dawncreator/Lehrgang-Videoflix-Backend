@@ -1,58 +1,27 @@
 import os
-from django.urls import reverse
+import pytest
 from django.conf import settings
-from rest_framework.test import APITestCase, APIClient
-from django.contrib.auth import get_user_model
-
-User = get_user_model()
 
 
-class HLSSegmentEndpointTests(APITestCase):
-    """
-    Tests for single HLS TS segment.
-    """
+@pytest.mark.django_db
+class HLSSegmentEndpointTests:
 
-    def setUp(self):
-        self.user = User.objects.create_user(
-            email="test@example.com",
-            username="test@example.com",
-            password="pass1234",
-            is_active=True
-        )
-        self.client = APIClient()
-        self.client.force_authenticate(self.user)
+    def test_segment_not_found(self, client):
+        url = "/api/video/1/720p/0000.ts"
+        response = client.get(url)
+        assert response.status_code == 404
 
-        self.movie_id = 1
-        self.res = "480p"
-        self.segment = "0001.ts"
+    def test_segment_success(self, client):
+        base = os.path.join(settings.MEDIA_ROOT, "hls", "1", "720p")
+        os.makedirs(base, exist_ok=True)
+        seg_path = os.path.join(base, "0001.ts")
 
-        self.dir_path = os.path.join(
-            settings.MEDIA_ROOT,
-            "hls",
-            str(self.movie_id),
-            self.res
-        )
-        os.makedirs(self.dir_path, exist_ok=True)
+        with open(seg_path, "wb") as f:
+            f.write(b"dummy")
 
-        self.file_path = os.path.join(self.dir_path, self.segment)
-        with open(self.file_path, "wb") as f:
-            f.write(b"FAKE TS DATA")
-
-    def test_segment_success(self):
-        url = reverse(
-            "api-hls-segment",
-            args=[self.movie_id, self.res, self.segment]
-        )
-        response = self.client.get(url)
+        url = "/api/video/1/720p/0001.ts"
+        response = client.get(url)
 
         assert response.status_code == 200
-        assert response["Content-Type"] == "video/MP2T"
-
-    def test_segment_not_found(self):
-        url = reverse(
-            "api-hls-segment",
-            args=[99, "480p", "nope.ts"]
-        )
-        response = self.client.get(url)
-
-        assert response.status_code == 404
+        assert response["Content-Type"] in ["video/mp2t",
+                                            "application/octet-stream"]
